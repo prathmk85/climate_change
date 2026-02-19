@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Climate & Air Quality Dashboard (MVP)</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f4f6f8;
+    }
+
+    header {
+      padding: 12px 16px;
+      background: #1f2933;
+      color: white;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    .container {
+      display: flex;
+      height: calc(100vh - 50px);
+    }
+
+    #map {
+      flex: 1;
+    }
+
+    .panel {
+      width: 35%;
+      background: white;
+      padding: 16px;
+      box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+      overflow-y: auto;
+    }
+
+    .card {
+      padding: 12px;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      background: #f9fafb;
+      border-left: 6px solid #ccc;
+    }
+
+    .label {
+      font-weight: bold;
+      color: #374151;
+    }
+
+    .value {
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
+    canvas {
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+  <header>Climate & Air Quality Awareness Dashboard (MVP)</header>
+
+  <div class="container">
+    <div id="map"></div>
+
+    <div class="panel">
+      <h3>Live Sensor Data</h3>
+      <div id="cards"></div>
+
+      <h3>Trends (Recent Readings)</h3>
+      <canvas id="co2Chart" height="160"></canvas>
+      <canvas id="tempChart" height="160"></canvas>
+      <canvas id="humChart" height="160"></canvas>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const map = L.map("map").setView([43.77591, -79.493176], 10);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "© OpenStreetMap",
+    }).addTo(map);
+
+    let markers = [];
+    let co2Chart, tempChart, humChart;
+
+    async function fetchSensorData() {
+      const res = await fetch("/api/sensor-data");
+      const data = await res.json();
+
+      renderMap(data);
+      renderCards(data);
+    }
+
+    async function fetchHistory() {
+      const res = await fetch("/api/history");
+      const data = await res.json();
+      renderCharts(data);
+    }
+
+    function renderMap(data) {
+      markers.forEach((m) => map.removeLayer(m));
+      markers = [];
+
+      data.forEach((station) => {
+        const marker = L.circleMarker([station.latitude, station.longitude], {
+          radius: 10,
+          color: station.color,
+          fillColor: station.color,
+          fillOpacity: 0.8,
+        })
+          .addTo(map)
+          .bindPopup(`
+            <b>${station.name}</b><br/>
+            CO₂: ${station.co2} ppm<br/>
+            Temp: ${station.temperature} °C<br/>
+            Humidity: ${station.humidity}%<br/>
+            Quality: ${station.quality}
+          `);
+
+        markers.push(marker);
+      });
+    }
+
+    function renderCards(data) {
+      const container = document.getElementById("cards");
+      container.innerHTML = "";
+
+      data.forEach((s) => {
+        const div = document.createElement("div");
+        div.className = "card";
+        div.style.borderLeftColor = s.color;
+
+        div.innerHTML = `
+          <div class="label">${s.name}</div>
+          <div class="value">CO₂: ${s.co2} ppm</div>
+          <div>Temp: ${s.temperature} °C</div>
+          <div>Humidity: ${s.humidity}%</div>
+          <div>Quality: <b>${s.quality}</b></div>
+          <div><small>${new Date(s.timestamp).toLocaleString()}</small></div>
+        `;
+
+        container.appendChild(div);
+      });
+    }
+
+    function buildChart(canvasId, label, labels, values, minY, maxY) {
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels,
+          datasets: [
+            {
+              label,
+              data: values,
+              tension: 0.35,
+              pointRadius: 2,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          scales: {
+            y: {
+              suggestedMin: minY,
+              suggestedMax: maxY,
+            },
+          },
+        },
+      });
+    }
+
+    function renderCharts(history) {
+      if (!history || history.length === 0) return;
+
+      const labels = history.map(h => new Date(h.timestamp).toLocaleString()).reverse();
+      const co2Vals = history.map(h => h.co2).reverse();
+      const tempVals = history.map(h => h.temperature).reverse();
+      const humVals = history.map(h => h.humidity).reverse();
+
+      if (co2Chart) co2Chart.destroy();
+      if (tempChart) tempChart.destroy();
+      if (humChart) humChart.destroy();
+
+      co2Chart = buildChart("co2Chart", "CO₂ (ppm)", labels, co2Vals, 380, 560);
+      tempChart = buildChart("tempChart", "Temperature (°C)", labels, tempVals, 20, 32);
+      humChart = buildChart("humChart", "Humidity (%)", labels, humVals, 35, 70);
+    }
+
+    fetchSensorData();
+    fetchHistory();
+
+    setInterval(fetchSensorData, 3000);   // every 3 seconds
+    setInterval(fetchHistory, 5000);      // every 5 seconds
+  </script>
+</body>
+</html>
